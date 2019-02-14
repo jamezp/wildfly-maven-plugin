@@ -23,6 +23,7 @@
 package org.wildfly.plugin.deployment;
 
 import java.io.File;
+import java.util.List;
 
 import org.apache.maven.plugins.annotations.Parameter;
 import org.wildfly.plugin.common.PropertyNames;
@@ -57,6 +58,12 @@ abstract class AbstractAppDeployment extends AbstractDeployment {
     @Parameter(alias = "check-packaging", property = PropertyNames.CHECK_PACKAGING, defaultValue = "true")
     private boolean checkPackaging;
 
+    /**
+     * A list of project names to be included for deployment.
+     */
+    @Parameter(property = "wildfly.deployment.includes")
+    private List<String> includes;
+
     @Override
     protected boolean skipExecution() {
         boolean skip = super.skipExecution();
@@ -67,7 +74,7 @@ abstract class AbstractAppDeployment extends AbstractDeployment {
                 skip = true;
             }
         }
-        return skip;
+        return skip || includes.contains(project.getName());
     }
 
     @Override
