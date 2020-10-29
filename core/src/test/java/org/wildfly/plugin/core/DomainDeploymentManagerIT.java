@@ -81,7 +81,11 @@ public class DomainDeploymentManagerIT extends AbstractDeploymentManagerTest {
             if (ServerHelper.isDomainRunning(client) || ServerHelper.isStandaloneRunning(client)) {
                 Assert.fail("A WildFly server is already running: " + ServerHelper.getContainerDescription(client));
             }
-            final DomainCommandBuilder commandBuilder = DomainCommandBuilder.of(Environment.WILDFLY_HOME);
+            final DomainCommandBuilder commandBuilder = DomainCommandBuilder.of(Environment.WILDFLY_HOME)
+                    .addHostControllerJavaOption("-Djava.util.logging.manager=org.jboss.logmanager.LogManager")
+                    .addHostControllerJavaOption("-Dorg.wildfly.logging.skipLogManagerCheck=true")
+                    .addProcessControllerJavaOption("-Djava.util.logging.manager=org.jboss.logmanager.LogManager")
+                    .addProcessControllerJavaOption("-Dorg.wildfly.logging.skipLogManagerCheck=true");
             if (IS_MODULAR_JDK) {
                 commandBuilder.addHostControllerJavaOptions(MODULAR_JDK_ARGUMENTS);
             }
