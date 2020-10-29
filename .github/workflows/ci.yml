@@ -37,6 +37,12 @@ jobs:
           java-version: ${{ matrix.java }}
       - name: Build and Test on ${{ matrix.java }}
         run: mvn clean install '-Dorg.jboss.logmanager.nocolor=true'
+      - name: Test Start ${{ matrix.java }}
+        if: always()
+        run: core/target/wildfly-17.0.1.Final/bin/domain.sh -Dorg.wildfly.logging.skipLogManagerCheck=true &
+      - name: Test Start ${{ matrix.java }}
+        if: always()
+        run: sleep 15 && core/target/wildfly-17.0.1.Final/bin/jboss-cli.sh -c "/host=master:shutdown"
       - uses: actions/upload-artifact@v2
         if: failure()
         with:
