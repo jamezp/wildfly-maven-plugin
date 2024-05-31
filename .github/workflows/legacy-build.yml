@@ -26,34 +26,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java: ['11']
         wildfly-version: ['26.1.3.Final', '27.0.1.Final']
 
     steps:
       - uses: actions/checkout@v4
-      - name: Set up JDK ${{ matrix.java }}
+      - name: Set up JDKs
         uses: actions/setup-java@v4
         with:
-          java-version: ${{ matrix.java }}
+          java-version: |
+            11
+            17
           cache: 'maven'
           distribution: 'temurin'
-      - name: Build and Test on ${{ matrix.java }} - ${{ matrix.wildfly-version }}
-        run: mvn clean install '-Dorg.jboss.logmanager.nocolor=true' '-Dversion.org.wildfly=${{ matrix.wildfly-version }}'
+      - name: Build and Test on ${{ matrix.wildfly-version }}
+        run: mvn clean install '-Dorg.jboss.logmanager.nocolor=true' '-Dversion.org.wildfly=${{ matrix.wildfly-version }}'  '-Djava11.home=${{ env.JAVA_HOME_11_X64 }}'
       - name: Upload surefire logs for failed run
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: surefire-reports-${{ matrix.java }}-${{ matrix.wildfly-version }}
+          name: surefire-reports-${{ matrix.wildfly-version }}
           path: '**/surefire-reports/'
       - name: Upload failsafe logs for failed run
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: failsafe-reports-${{ matrix.java }}-${{ matrix.wildfly-version }}
+          name: failsafe-reports-${{ matrix.wildfly-version }}
           path: '**/failsafe-reports/'
       - name: Upload logs for failed run
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: server-logs-${{ matrix.java }}-${{ matrix.wildfly-version }}
+          name: server-logs-${{ matrix.wildfly-version }}
           path: '**/*.log'
