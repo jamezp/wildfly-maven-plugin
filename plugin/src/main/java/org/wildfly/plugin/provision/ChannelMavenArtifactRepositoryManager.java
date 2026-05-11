@@ -13,6 +13,7 @@ import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -23,13 +24,14 @@ import java.util.regex.Pattern;
 
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.logging.Log;
-import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
 import org.eclipse.aether.DefaultRepositorySystemSession;
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.ArtifactRequest;
+import org.eclipse.aether.resolution.ArtifactResolutionException;
 import org.eclipse.aether.resolution.VersionRangeRequest;
 import org.eclipse.aether.resolution.VersionRangeResolutionException;
 import org.eclipse.aether.resolution.VersionRangeResult;
@@ -74,9 +76,8 @@ public class ChannelMavenArtifactRepositoryManager implements MavenRepoManager, 
             throw new MojoExecutionException("No channel specified.");
         }
         this.log = log;
-        session = MavenRepositorySystemUtils.newSession();
+        session = new DefaultRepositorySystemSession(contextSession);
         this.repositories = repositories;
-        session.setLocalRepositoryManager(contextSession.getLocalRepositoryManager());
         session.setOffline(offline);
         for (ChannelConfiguration channelConfiguration : channels) {
             this.channels.add(channelConfiguration.toChannel(offline ? Collections.emptyList() : repositories));
@@ -101,6 +102,65 @@ public class ChannelMavenArtifactRepositoryManager implements MavenRepoManager, 
         channelSession = new ChannelSession(this.channels, factory);
         localCachePath = contextSession.getLocalRepositoryManager().getRepository().getBasedir().toPath();
         this.system = system;
+    }
+
+    /**
+     * Bulk artifact pre-fetch. The default {@link MavenRepoManager#resolveAll}
+     * iterates {@link #resolve(MavenArtifact)} sequentially: one HTTP round-trip
+     * per artifact, dominating cold-cache provisioning time. This override pre-fetches
+     * all artifacts that already have a concrete version in one call to Aether's
+     * {@link RepositorySystem#resolveArtifacts(RepositorySystemSession, java.util.Collection)},
+     * which uses Aether's connector thread pool (default 5 threads) to download in
+     * parallel. After the pre-fetch every {@link #resolve(MavenArtifact)} call hits
+     * the local cache.
+     *
+     * <p>
+     * This path is only triggered when the Galleon provisioning option
+     * {@code jboss-bulk-resolve-artifacts} is set to {@code true} (see
+     * {@code WfInstallPlugin.resolveArtifactsInCache}). Without that option the
+     * upstream plugin keeps calling {@link #resolve(MavenArtifact)} per artifact
+     * and this override is unused.
+     *
+     * <p>
+     * Pre-fetch failures are non-fatal: any artifact not pre-fetched falls
+     * through to the per-artifact {@link #resolve(MavenArtifact)} path which keeps
+     * the existing channel/direct-resolve fallback semantics.
+     */
+    @Override
+    public void resolveAll(Collection<MavenArtifact> artifacts) throws MavenUniverseException {
+        if (artifacts == null || artifacts.isEmpty()) {
+            return;
+        }
+        List<ArtifactRequest> requests = new ArrayList<>(artifacts.size());
+        for (MavenArtifact a : artifacts) {
+            if (a.getVersion() == null || a.getVersion().isEmpty()) {
+                continue;
+            }
+            DefaultArtifact ax = new DefaultArtifact(a.getGroupId(), a.getArtifactId(),
+                    a.getClassifier() == null ? "" : a.getClassifier(),
+                    a.getExtension() == null ? "jar" : a.getExtension(),
+                    a.getVersion());
+            ArtifactRequest req = new ArtifactRequest();
+            req.setArtifact(ax);
+            req.setRepositories(repositories);
+            requests.add(req);
+        }
+        if (!requests.isEmpty()) {
+            try {
+                system.resolveArtifacts(session, requests);
+            } catch (ArtifactResolutionException ex) {
+                // Partial failure is fine: the per-artifact resolve below retries the misses
+                // through the channel/direct-resolve fallback.
+                if (log.isDebugEnabled()) {
+                    log.debug("Bulk pre-fetch reported missing artifacts; falling back to per-artifact resolve. "
+                            + ex.getMessage());
+                }
+            }
+        }
+        // Fall back to the per-artifact path; cached artifacts are now local hits.
+        for (MavenArtifact a : artifacts) {
+            resolve(a);
+        }
     }
 
     @Override
