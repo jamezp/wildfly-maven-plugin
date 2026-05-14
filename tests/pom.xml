@@ -128,6 +128,7 @@
                     <provisioning-dir>${project.build.directory}/wildfly</provisioning-dir>
                     <galleon-options>
                         <jboss-fork-embedded>${plugin.fork.embedded}</jboss-fork-embedded>
+                        <jboss-bulk-resolve-artifacts>true</jboss-bulk-resolve-artifacts>
                     </galleon-options>
                 </configuration>
                 <executions>
