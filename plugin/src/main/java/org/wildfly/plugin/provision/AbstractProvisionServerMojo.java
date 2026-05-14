@@ -13,6 +13,7 @@ import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -305,8 +306,22 @@ abstract class AbstractProvisionServerMojo extends AbstractMojo {
             MojoExecutionException, IOException, XMLStreamException {
         GalleonBuilder galleonBuilder = new GalleonBuilder();
         galleonBuilder.addArtifactResolver(artifactResolver);
+        // When a provisioning file is supplied and no plugin-side feature-packs
+        // are configured, route the file path directly to the provisioning
+        // manager. The Galleon API roundtrip
+        // (loadProvisioningConfig -> provision(GalleonProvisioningConfig))
+        // silently drops <feature> elements nested under <config> because the
+        // GalleonProvisioningConfig <-> ProvisioningConfig conversion erases
+        // ConfigItemContainer items when the configuration crosses the
+        // isolated core class loader. Using the path-based provision call
+        // preserves the parsed ProvisioningConfig as-is.
+        Path resolvedProvisioningFile = resolvePath(project, provisioningFile.toPath());
+        boolean provisionFromFile = featurePacks.isEmpty()
+                && Files.exists(resolvedProvisioningFile);
         GalleonProvisioningConfig config = buildGalleonConfig(galleonBuilder);
-        ProvisioningBuilder builder = galleonBuilder.newProvisioningBuilder(config);
+        ProvisioningBuilder builder = provisionFromFile
+                ? galleonBuilder.newProvisioningBuilder(resolvedProvisioningFile)
+                : galleonBuilder.newProvisioningBuilder(config);
         try (Provisioning pm = builder
                 .setInstallationHome(home)
                 .setMessageWriter(new MvnMessageWriter(getLog()))
@@ -317,19 +332,29 @@ abstract class AbstractProvisionServerMojo extends AbstractMojo {
                 Path targetPath = Paths.get(project.getBuild().getDirectory());
                 Path file = targetPath.resolve(PLUGIN_PROVISIONING_FILE);
                 getLog().info("Dry-run execution, generating provisioning.xml file: " + file);
-                pm.storeProvisioningConfig(config, file);
+                if (provisionFromFile) {
+                    Files.createDirectories(targetPath);
+                    Files.copy(resolvedProvisioningFile, file,
+                            StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    pm.storeProvisioningConfig(config, file);
+                }
                 return;
             }
             getLog().info("Provisioning server in " + home);
             PluginProgressTracker.initTrackers(pm, new MavenJBossLogger(getLog()));
-            pm.provision(config, galleonOptions);
+            if (provisionFromFile) {
+                pm.provision(resolvedProvisioningFile, galleonOptions);
+            } else {
+                pm.provision(config, galleonOptions);
+            }
             // Check that at least the standalone or domain directories have been generated.
             if (!Files.exists(home.resolve("standalone")) && !Files.exists(home.resolve("domain"))) {
                 getLog().error("Invalid galleon provisioning, no server provisioned in " + home + ". Make sure "
                         + "that the list of Galleon feature-packs and Galleon layers are properly configured.");
                 throw new MojoExecutionException("Invalid plugin configuration, no server provisioned.");
             }
-            if (!recordProvisioningState) {
+            if (!recordProvisioningState && !provisionFromFile) {
                 Path file = home.resolve(PLUGIN_PROVISIONING_FILE);
                 pm.storeProvisioningConfig(config, file);
             }
